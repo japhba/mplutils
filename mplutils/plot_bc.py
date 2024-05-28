@@ -1,19 +1,40 @@
-
+import logging
+import platform
+import pprint
+import subprocess
 from contextlib import contextmanager
+from pathlib import Path
+
+from dataclasses import asdict
+
+from matplotlib import cm
+from matplotlib.ticker import Locator
+
+
+import joblib
+import matplotlib.pyplot as plt
+from matplotlib.transforms import Affine2D, Bbox, TransformedBbox, blended_transform_factory
+import numpy as np
+import yaml
+
+logger = logging.getLogger(__name__)
+
 import os
 import sys
 import platform
-import numpy as np
 
-import logging
-logger = logging.getLogger(__name__)
+def fractions(x,pos, step):
+    if np.isclose((x/step)%(1./step),0.):
+        # x is an integer, so just return that
+        return '{:.0f}'.format(x)
+    else:
+        # this returns a latex formatted fraction
+        return rf"${'+' if x > 0 else '-'}$"+'$\\frac{{{:2.0f}}}{{{:2.0f}}}$'.format(np.abs(x/step),1./step)
+        # if you don't want to use latex, you could use this commented
+        # line, which formats the fraction as "1/13"
+        ### return '{:2.0f}/{:2.0f}'.format(x/step,1./step)
 
-def set_scale():
-    import seaborn as sns
-    # from sns.seaborn.rcmod import plotting_context
-    plotting_context
 
-set_scale()
 
 def get_inkscape_palettes_directory():
     if platform.system() == 'Windows':
@@ -30,89 +51,111 @@ def get_inkscape_palettes_directory():
     
     return Path(path)
 
-def pt_to_data_coords(ax, pt):
-    dpi = ax.figure.dpi  # Get the figure's DPI
-    display_spacing = pt * dpi / 72  # Convert pt to display spacing
-    trans = ax.transData.inverted()  # Get the inverted data transformation object
-
-    # Calculate the corresponding data spacing
-    data_spacing = abs(trans.transform((display_spacing, 0))[0] - trans.transform((0, 0))[0])
-    return data_spacing
 
 
-
-def plot_kernel(ax, k, projection="xx", align_labels=True, bar=False, xx=None, thetas=None, order="1-xx", grid=False,p = None, **largs):
-
-    if (xx is None) and (thetas is None):
-        xx = 1-np.geomspace(1e-5,1,100)
-        xx = np.concatenate([[1], xx])
-    elif (xx is None) and (thetas is not None):
-        xx = np.cos(thetas)
-    elif (xx is not None) and (thetas is None):
-        pass
-    else:
-        raise ValueError
-
-
-    if projection == "xx":
-        x_resc = 1-xx if order == "1-xx" else xx
-        ax.set_xlim(-.1, 1.1)
-        ax.set_xticks([0,1])
-
-        if bar is False:
-            ax.set_xlabel(rf"${'1-' if order == '1-xx' else ''}\boldsymbol{{x}} \cdot \boldsymbol{{x}}'$")
-        else:
-            ax.set_xlabel(rf"${'1-' if order == '1-xx' else ''}\bar{{\boldsymbol{{x}}}} \cdot \bar{{\boldsymbol{{x}}}}'$")
-        ax.set_aspect(1)
-
-    elif projection == "theta":
-        x_resc = np.arccos(xx) if order == "1-xx" else np.pi/2 - np.arccos(xx)
-        ax.set_xlim(0, np.pi/2*1.1)
-        ax.set_xticks([-.1*np.pi/2, np.pi/2])
-        ax.set_xticklabels([0,r"$\frac{\pi}{2}$"])
-        ax.set_xlabel(r"$\Delta\theta$")
-        dxlim = np.diff(ax.get_xlim())
-        dylim = np.diff(ax.get_ylim())
-        ax.set_aspect(dxlim/dylim)
-    else:
-        raise ValueError
-
-    if p is not None:
-        from bayesianchaos.scripts.colors import GRAYS
-        # rescale colormap
-        from matplotlib.colors import ListedColormap
-        cmap = GRAYS
-        cs = cmap(np.linspace(.5,1,500))
-        cmap = ListedColormap(cs)
-        c_line(ax, x_resc, k(xx), c=p(xx), cmap=cmap, **largs)
-        l = None
-    else:
-        l, = ax.plot(x_resc, k(xx), **largs)
-
-    ax.set_ylim(-.1, 1.1)
-    # ax.set_title(f"g={g:.2f}")
+def plot_rasterplot(ax, Xt, norm=None, aspect="auto", extent=None,  axis_off=True, **largs):
+    if extent is None:
+        extent = [0, shp[1], 0, shp[0]]
+    shp = Xt.shape
+    cmap = largs.pop("cmap", "Greys")
+    if norm is None:
+        norm = plt.Normalize(vmin=-1, vmax=+1)
+    mat = ax.matshow(Xt, cmap=cmap, norm=norm, aspect=aspect,
+                     extent=extent, interpolation='none', rasterized=False)
     
-    ax.set_yticks([0,1])
-    if bar is False:
-        ax.set_ylabel(r"$\boldsymbol{\phi}_{\boldsymbol{x}}\cdot\boldsymbol{\phi}_{\boldsymbol{x}'}$")
-    else:
-        ax.set_ylabel(r"$ \bar{\boldsymbol{\phi}}_{\boldsymbol{x}} \cdot \bar{\boldsymbol{\phi}}_{\boldsymbol{x}'}$")
+    ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True, top=False, labeltop=False)
+    ax.xaxis.set_ticks_position('bottom')
 
-    if align_labels:
-        xylabel_to_ticks(ax, which="both")
+    if axis_off:
+        # no ticks
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    if grid:
-        ax.spines.right.set_visible(True)
+        # no ticklabels
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+
+        # spines to all sides
         ax.spines.top.set_visible(True)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        ax.set_xticks([.25, .5, .75], minor=True)
-        ax.set_yticks([.25, .5, .75], minor=True)
-        ax.grid(which='major')
-        ax.grid(which='minor', alpha=0.2, linewidth=0.5)
+        ax.spines.right.set_visible(True)
+        ax.spines.bottom.set_visible(True)
+        ax.spines.left.set_visible(True)
 
-    return l,
 
+
+def fill_between(
+        ax,
+        x,
+        y=None,
+        y_mean=None,
+        y_std=None,
+        gauss_reduce=True,
+        line=True,
+        discrete=False,
+        **line_args,
+):
+    if gauss_reduce:
+        if y is not None:
+            fac = y.shape[0] ** 0.5
+        else:
+            fac = gauss_reduce
+    else:
+        fac = 1
+
+    fill_alpha = line_args.pop("fill_alpha", .3)
+    line_alpha = line_args.pop("alpha", 1.)
+
+    if (y is not None) and (y.shape[0] == 1):
+        l, = ax.plot(x, y[0], alpha=line_alpha, **line_args)
+        return l, None
+
+    if y is not None:
+        y = np.atleast_2d(y)
+        if y.shape[0] == 1:
+            # leave immediately
+            l, = ax.plot(x, y[0], **line_args)
+            return l, None
+        mean = y.mean(axis=0)
+        std = y.std(axis=0) / fac
+        if (std < 1e-10).all(): logger.warning("Trivial std observed while attempting fill_between plot")
+    else:
+        mean = y_mean
+        std = y_std / fac
+
+    
+    if not discrete:
+        if line:
+            line_args["markersize"] = 4
+            (l,) = ax.plot(x, mean, alpha=line_alpha, **line_args)
+            lc = l.get_color()
+        else:
+            l = None
+            lc = None
+
+        if (std != 0).any():
+            c = line_args.get("color", lc)
+            idx = np.argsort(x)
+            x = np.array(x)
+            fill = ax.fill_between(
+                x[idx],
+                (mean - std)[idx],
+                (mean + std)[idx],
+                alpha=fill_alpha,
+                color=c,
+                zorder=-10,
+            )
+        else:
+            fill = None
+    else:
+        ls = line_args.pop("ls", "none")
+        marker = line_args.pop("marker", "o")
+
+        l = ax.errorbar(
+            x, mean, yerr=std, ls=ls, fmt=marker, capsize=4, **line_args
+        )
+        fill = None
+
+    return l, fill
 
 def extra_scale_from_function(ax, func, label="", extra=False):
     ax_sigma = ax.twiny() if extra else ax
@@ -153,35 +196,6 @@ def multiple_formatter(denominator=2, number=np.pi, latex="\pi"):
                 return r"$\frac{%s%s}{%s}$" % (num, latex, den)
 
     return _multiple_formatter
-
-
-def plot_autocorr(x, ts, net=None):
-    skip = 10
-
-    autocorrs = (
-        np.atleast_2d(np.einsum("...it,...it->...t", x[..., ::skip], x[..., ::skip]))
-        / net.N
-    )
-
-    ts = ts[::10]
-    plt.plot(ts, autocorrs.mean(axis=0))
-    plt.fill_between(
-        ts,
-        autocorrs.mean(axis=0) - autocorrs.std(axis=0),
-        autocorrs.mean(axis=0) + autocorrs.std(axis=0),
-        alpha=0.1,
-        zorder=-1,
-    )
-    plt.ylim(0.0, net.Q0 * 1.3)
-
-    plt.ylabel(r"$h^\alpha \cdot h^\alpha$")
-    plt.xlabel(r"$t/\tau$")
-    plt.axhline(net.Q0)
-    ax = plt.gca()
-    # add_tick(ax, net.Q0, "$Q_0$", which="y")
-    # plt.tight_layout()
-    if SHOW: show_plot()
-
 
 class Multiple:
     def __init__(self, denominator=2, number=np.pi, latex="\pi"):
@@ -228,87 +242,10 @@ def tight_bbox(ax):
     tight_bbox_fig = TransformedBbox(tight_bbox_raw, fig.transFigure.inverted())
     return tight_bbox_raw
 
-LABEL_KWARGS = dict(size=11, weight='bold')
-def add_panel_label(
-        ax,
-        letter,
-        pad_x=0,
-        pad_y=0,
-        use_tight_bbox=False,
-        ha="right",
-        va="top",
-        transform=None,
-        return_text=False,
-        x=0,
-        y=1,
-        **text_kwargs,
-):
-
-    if "$" in letter:
-        letter_ = letter[1:-2]
-    else:
-        letter_ = letter
-
-    letter = r"$\mathrm{\mathbf{" + letter_ + "}}$"
-
-    if text_kwargs == {}:
-        text_kwargs = LABEL_KWARGS
-
-    if use_tight_bbox:
-        bbox_fig = tight_bbox(ax)
-        from matplotlib.transforms import TransformedBbox
-        from matplotlib.transforms import Affine2D
-        from matplotlib.transforms import Bbox
-
-        fig = ax.get_figure()
-        bbox_bare_fig = ax.get_position()
-
-        w, h = fig.get_size_inches()
-        bbox_bare_in = Bbox(
-            [
-                [bbox_bare_fig.y0 * w, bbox_bare_fig.y0 * h],
-                [bbox_bare_fig.x1 * w, bbox_bare_fig.y1 * h],
-            ]
-        )
-        bbox_ax = TransformedBbox(bbox_fig, ax.transAxes.inverted())
-        bbox_tight_in = TransformedBbox(bbox_fig, Affine2D().scale(1.0 / fig.dpi))
-
-        which_align = "left"
-        # get diff in inches and convert to points
-        start_x_pt = (
-            abs(bbox_tight_in.xmin - bbox_bare_in.xmin) * 72
-            if which_align == "left"
-            else abs(bbox_tight_in.xmax - bbox_bare_in.xmax) * 72
-        )
-
-        text = ax.annotate(letter, xy=(0, 1), xytext=(-start_x_pt - pad_x, 0),
-                           xycoords='axes fraction' if transform is None else transform, textcoords='offset points',
-                           ha=ha, va=va, rotation=0, **LABEL_KWARGS)
-    else:
-        text = ax.set_title(
-            letter,
-            **text_kwargs,
-            ha=ha,
-            va="top",
-            x=x - pad_x,
-            y=y + pad_y,
-            pad=0.0,
-            transform=ax.transAxes if transform is None else transform,
-        )
-
-    return text
-
 def format_angle(ax, n=2):
     ax.xaxis.set_major_locator(plt.MultipleLocator(np.pi / n))
     ax.xaxis.set_major_formatter(plt.FuncFormatter(multiple_formatter(n, np.pi)))
 
-def align_labels(laxes):
-    maxpad = 0
-    for lax in laxes:
-        maxpad = max(lax.yaxis.labelpad, maxpad)
-
-    for lax in laxes:
-        lax.yaxis.labelpad = maxpad
 
 
 def xylabel_to_ticks(ax, which="both", pad=0.):
@@ -333,10 +270,7 @@ def xylabel_to_ticks(ax, which="both", pad=0.):
         
         ax.xaxis.get_label().set_horizontalalignment("center")
         ax.xaxis.get_label().set_verticalalignment("bottom" if which == "top" else "top")
-        try:
-            ticklab = ax.xaxis.get_ticklabels()[0]
-        except:
-            ticklab = ax.xaxis.get_ticklabels(minor=True)[0]
+        ticklab = ax.xaxis.get_ticklabels()[0]
         trans = ticklab.get_transform()
         x_label_coords = trans.inverted().transform(ax.transAxes.transform(x_label.get_position()))
 
@@ -347,10 +281,7 @@ def xylabel_to_ticks(ax, which="both", pad=0.):
         
         ax.yaxis.get_label().set_horizontalalignment("center")
         ax.yaxis.get_label().set_verticalalignment("bottom" if which == "left" else "top")
-        try:
-            ticklab = ax.yaxis.get_ticklabels()[0]
-        except:
-            ticklab = ax.yaxis.get_ticklabels(minor=True)[0]
+        ticklab = ax.yaxis.get_ticklabels()[0]
         trans = ticklab.get_transform()
 
         y_label_coords = trans.inverted().transform(ax.transAxes.transform(y_label.get_position()))
@@ -362,16 +293,6 @@ def frame_only(ax):
     no_spine(ax, which="bottom", spine=True)
     no_spine(ax, which="left", spine=True)
     no_spine(ax, which="right", spine=True)
-
-def get_limits(ax):
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-    if hasattr(ax, "get_zlim"):
-        zlim = ax.get_zlim()
-        return xlim, ylim, zlim
-    else:
-        return xlim, ylim
-
 
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import FancyArrowPatch
@@ -436,18 +357,6 @@ def plot_arrow(ax):
 
     ax.axis("off")
     ax.set_xlim(0., 1.0)
-
-def data_lims_to_square_env(ax, margins=0.1):
-    diffs = [np.diff(lim) for lim in get_limits(ax)]
-    max_d = np.max(diffs)*(1+margins)
-    cart = ["x", "y", "z"]
-    for i, diff in enumerate(diffs):
-        if diff < max_d:
-            lim = getattr(ax, f"get_{cart[i]}lim")()
-            pad_remain = max_d - diff
-            getattr(ax, f"set_{cart[i]}lim")(
-                lim[0] - pad_remain / 2, lim[1] + pad_remain / 2
-            )
 
 def save_plot(
         path,
@@ -522,7 +431,7 @@ def save_plot(
             file,
         )
 
-def save_test_artifact(request, fig=None, title=""):
+def save_test_artifact(request, fig=None, title="", **kwargs):
     artifact_dir = TESTPATH / "artifacts" / request.node.path.stem
     artifact_dir.mkdir(exist_ok=True, parents=True)
     test_str = request.node.name.split('[')[0]
@@ -536,6 +445,7 @@ def save_test_artifact(request, fig=None, title=""):
             fn_prefix=f"{test_str}__{config_str}",
             use_hash=True,
             include_filename=False,
+            **kwargs
     )
 
 def merge_lh(hl1, hl2):
@@ -546,16 +456,17 @@ def merge_lh(hl1, hl2):
 
 
 def place_graphic(ax, inset_path, fit=None):
+    import subprocess
+    from pathlib import Path
+    import platform
     fig = ax.get_figure()
     plt.rcParams['text.usetex'] = False
-    # ax.axis("off")
-    no_spine(ax, which="left", remove_all=True)
-    no_spine(ax, which="bottom", remove_all=True)
+    ax.axis("off")
     # no_spine(ax, which="right", remove_all=True)
 
     # freeze fig to finish off layout, new in 3.6
     fig.canvas.draw()
-    fig.set_layout_engine(None)
+    fig.set_layout_engine('none')
 
     ax_bbox = ax.get_position()
     fig_w, fig_h = fig.get_size_inches()
@@ -563,7 +474,7 @@ def place_graphic(ax, inset_path, fit=None):
     plt.rcParams.update(
         {
             "pgf.texsystem": "lualatex",
-            "pgf.preamble": r"\usepackage{graphicx}\usepackage[export]{adjustbox}",
+            "pgf.preamble": r"\usepackage{graphicx}\usepackage[export]{adjustbox}\usepackage{amsmath}",
         }
     )
 
@@ -609,6 +520,44 @@ def place_graphic(ax, inset_path, fit=None):
     print(bbox[fit])
     ax.text(0.0, 0.0, tex_cmd)
 
+def plot_traj(ax, x, y, alpha_min=.3, alpha_max=1., mark='none', gain=None, **largs):
+    if gain is None:
+       gain = lambda t: t
+
+    c = largs.pop('c', largs.pop('color', 'k'))
+    alpha = largs.pop('alpha', 1)
+    # convert to RGBA
+    
+    c = mcolors.to_rgb(c) if type(c) == str else c
+    points = np.array([x, y]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    gains = gain(np.linspace(0, 1, len(x)))
+    alphas = alpha_min + (alpha_max - alpha_min) * gains
+
+    ls = largs.pop('ls', '-')
+    cmap = ListedColormap([(c, alpha) for alpha in alphas])
+    if ls != 'none':
+        lc = LineCollection(segments, cmap=cmap, norm=plt.Normalize(0, 1))
+        color_val = x / x.max()
+        # Set the values used for colormapping
+        lc.set_array(color_val)
+        lc.set_linewidth(1)
+        line = ax.add_collection(lc)
+    else:
+        line = None
+
+    # make markers at start and end
+    m_args = dict(marker='o', zorder=10, ls='none')
+    if 'start' in mark.lower():
+        ax.plot(x[0], y[0], c=c, alpha=alpha_min, **(m_args | largs))
+    if 'end' in mark.lower():
+        ax.plot(x[-1], y[-1], c=c, alpha=alpha_max,  **(m_args | largs))
+
+    if 'all' in mark.lower():
+        for i in range(len(x)):
+            ax.plot(x[i], y[i], c=c, alpha=alphas[i], **(m_args | largs))
+
+    return line,
 
 def color_ax(ax, color):
     ax.yaxis.label.set_color(color)
@@ -1030,9 +979,10 @@ def fill_between(
             fac = gauss_reduce
     else:
         fac = 1
-
-    fill_alpha = line_args.pop("fill_alpha", .3)
-    line_alpha = line_args.pop("line_alpha", 1.)
+        
+    alpha = line_args.pop("alpha", .3)
+    fill_alpha = line_args.pop("fill_alpha", .3) if 'fill_alpha' in line_args else .3
+    line_alpha = line_args.pop("line_alpha", 1.) if 'line_alpha' in line_args else alpha
 
     if (y is not None) and (y.shape[0] == 1):
         l, = ax.plot(x, y[0], **line_args)
@@ -1207,6 +1157,65 @@ def plot_norm(ax, net, sim_opts, Xt=None, norms=None, warmup=False, N_SIGMA=None
 
     ax.set_ylim(bottom=0)
 
+
+class MinorSymLogLocator(Locator):
+    """
+    Dynamically find minor tick positions based on the positions of
+    major ticks for a symlog scaling.
+    """
+    def __init__(self, linthresh):
+        """
+        Ticks will be placed between the major ticks.
+        The placement is linear for x between -linthresh and linthresh,
+        otherwise its logarithmically
+        """
+        self.linthresh = linthresh
+
+    def __call__(self):
+        'Return the locations of the ticks'
+        majorlocs = self.axis.get_majorticklocs()
+
+        # iterate through minor locs
+        minorlocs = []
+
+        # handle the lowest part
+        for i in range(1, len(majorlocs)):
+            majorstep = majorlocs[i] - majorlocs[i-1]
+            if abs(majorlocs[i-1] + majorstep/2) < self.linthresh:
+                ndivs = 10
+            else:
+                ndivs = 9
+            minorstep = majorstep / ndivs
+            locs = np.arange(majorlocs[i-1], majorlocs[i], minorstep)[1:]
+            minorlocs.extend(locs)
+
+        return self.raise_if_exceeds(np.array(minorlocs))
+
+    def tick_values(self, vmin, vmax):
+        raise NotImplementedError('Cannot get tick locations for a '
+                                  '%s type.' % type(self))
+
+
+def rescale_rcparams(s):
+    """
+    From https://matplotlib.org/stable/users/explain/customizing.html
+    https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
+    https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py#L335
+    """
+    import seaborn as sns
+    ctx_dict = sns.plotting_context()
+
+    update_dict = {}
+    for k, v in ctx_dict.items():  # value is not used!
+        try:
+            update_dict[k] = s * plt.rcParams[k] if s != -1 else plt.rcParamsDefault[k]
+        except TypeError:
+            print(f"Could not rescale {k}")
+
+    plt.rcParams.update(update_dict)
+    return plt
+
+
 def c_line(ax, x, y, c, cmap, **largs):
     import matplotlib.collections as mcoll
 
@@ -1222,98 +1231,10 @@ def c_line(ax, x, y, c, cmap, **largs):
     lc.set_array(c)
     line = ax.add_collection(lc)
 
-def plot_disc(ax, x, y, **kwargs):
-    # https://stackoverflow.com/questions/10377593/how-to-drop-connecting-lines-where-the-function-is-discontinuous
-
-
-    pos = np.where(np.abs(np.diff(y)) > 0.)[0]+1
-    x = np.insert(x.astype(np.float32), pos, np.nan)
-    y = np.insert(y.astype(np.float32), pos, np.nan)
-
-    return ax.plot(x, y, **kwargs)
-
-def get_isort_tsp(vecs):
-    import matplotlib.pyplot as plt
-    import networkx as nx
-    import networkx.algorithms.approximation as nx_app
-    import math
-
-    vecs = vecs / np.linalg.norm(vecs, axis=-1, keepdims=True)
-
-    G = nx.random_geometric_graph(len(vecs), radius=0.4, seed=3)
-    pos = nx.get_node_attributes(G, "pos")
-
-    # Depot should be at (0,0)
-    pos[0] = (0.5, 0.5)
-
-    H = G.copy()
-
-    # Calculating the distances between the nodes as edge's weight.
-    for i in range(len(pos)):
-        for j in range(i + 1, len(pos)):
-            dist = 1 - vecs[i] @ vecs[j]
-            G.add_edge(i, j, weight=dist)
-
-    # logger.info("Calculating the shortest path")
-    cycle = nx_app.christofides(G, weight="weight")
-    edge_list = list(nx.utils.pairwise(cycle))
-
-    i_sort = np.array([e[0] for e in edge_list])
-
-    # # Draw closest edges on each node only
-    # nx.draw_networkx_edges(H, pos, edge_color="blue", width=0.5)
-
-    # # Draw the route
-    # nx.draw_networkx(
-    #     G,
-    #     pos,
-    #     with_labels=True,
-    #     edgelist=edge_list,
-    #     edge_color="red",
-    #     node_size=200,
-    #     width=3,
-    # )
-
-    # print("The route of the traveller is:", cycle)
-    # plt.show()
-
-    return i_sort
-
-def plot_rasterplot(ax, Xt, norm=None, aspect="auto", extent=None,  axis_off=True, tsp=False, **largs):
-    """
-    Time is the last axis.
-    """
-    shp = Xt.shape
-
-    if tsp:
-        logger.info("TSP sorting")
-        isort = get_isort_tsp(Xt)
-        Xt = Xt[isort]
-
-
-    if extent is None:
-        extent = [0, shp[1], 0, shp[0]]
-    shp = Xt.shape
-    cmap = largs.pop("cmap", "Greys")
-    if norm is None:
-        norm = plt.Normalize(vmin=-1, vmax=+1)
-    mat = ax.matshow(Xt, cmap=cmap, norm=norm, aspect=aspect,
-                     extent=extent, interpolation='none', rasterized=False)
-    
-    ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True, top=False, labeltop=False)
-    ax.xaxis.set_ticks_position('bottom')
-
-    if axis_off:
-        # no ticks
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        # no ticklabels
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
-
-        # spines to all sides
-        ax.spines.top.set_visible(True)
-        ax.spines.right.set_visible(True)
-        ax.spines.bottom.set_visible(True)
-        ax.spines.left.set_visible(True)
+    ax.dataLim.y0 = y.min()
+    ax.dataLim.y1 = y.max()
+    ax.autoscale_view()
+def setup_axes_labels(axd, labels=None):
+    labels = [rf"$\mathbf{{{k.upper() if labels is None else labels[i_k]}}}$" for i_k, k in enumerate(list(axd.keys()))]
+    for i, ax in enumerate(axd.values()):
+        ax.text(x=-.2, y=1.2, s=labels[i], transform=ax.transAxes, fontsize=12, fontweight='bold', va='top', ha='right')
