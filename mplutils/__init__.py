@@ -1004,7 +1004,6 @@ def fill_between(
     
     if not discrete:
         if line:
-            line_args["markersize"] = 4
             (l,) = ax.plot(x, mean, alpha=line_alpha, **line_args)
         else:
             l = None
