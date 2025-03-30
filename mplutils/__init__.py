@@ -23,6 +23,19 @@ import os
 import sys
 import platform
 
+def get_twin(ax, axis=['x', 'y']):
+    _siblings = [getattr(ax, f"get_shared_{axis}_axes")().get_siblings(ax) for axis in axis]
+    siblings = []
+    for sib in _siblings:
+        siblings.extend(sib)
+
+
+
+    for sibling in siblings:
+        if sibling.bbox.bounds == ax.bbox.bounds and sibling is not ax:
+            return sibling 
+    return None
+
 def fractions(x,pos, step):
     if np.isclose((x/step)%(1./step),0.):
         # x is an integer, so just return that
@@ -454,13 +467,13 @@ def merge_lh(hl1, hl2):
 
     return (h1 + h2, l1 + l2)
 
-
-def place_graphic(ax, inset_path, fit=None):
+def place_graphic(ax, inset_path, fit=None, mode="raster", inkscape_kwargs={}):
     import subprocess
     from pathlib import Path
     import platform
     fig = ax.get_figure()
     plt.rcParams['text.usetex'] = False
+    ax.cla()
     ax.axis("off")
     # no_spine(ax, which="right", remove_all=True)
 
@@ -500,11 +513,34 @@ def place_graphic(ax, inset_path, fit=None):
 
     path_str, temp_dir = create_temporary_copy(inset_path)
     if inset_path.suffix == ".svg":
-        path_str_pdf = str(temp_dir / (inset_path.stem + ".pdf"))
-        p = subprocess.run(
-            f"inkscape {path_str} --export-filename={path_str_pdf}", shell=True
-        )
-        path_str = path_str_pdf
+        # we first need to convert to a format that allows us to embed
+        inkscape_kwargs_dflt = {}
+        if mode == "raster":
+            inkscape_kwargs_dflt = inkscape_kwargs_dflt | {'export-dpi': 300}
+            path_str_rendered = str(temp_dir / (inset_path.stem + ".png"))
+            command = [
+                "inkscape",
+                path_str,
+                f"--export-filename={path_str_rendered}",
+            ]
+        else:
+            path_str_rendered = str(temp_dir / (inset_path.stem + ".pdf"))
+            command = [
+                "inkscape",
+                path_str,
+                f"--export-filename={path_str_rendered}"
+            ]
+        command.extend([f"--{key}" if value is None else f"--{key}={value}" for key, value in inkscape_kwargs.items()])
+
+        p = subprocess.run(command, capture_output=True, text=True)
+        path_str = path_str_rendered
+
+        # print inkscape --help if failed
+        if p.returncode != 0:
+            print(p.stderr)
+            help_out = subprocess.run(["inkscape", "--help"], capture_output=True, text=True)
+            print(help_out.stdout)
+            
     if fit is None:
         w, h = get_w_h(inset_path)
         if w / h > bbox["width"] / bbox["height"]:
@@ -513,12 +549,17 @@ def place_graphic(ax, inset_path, fit=None):
             fit = "height"
     else:
         assert "width" in fit or "height" in fit
-
-    tex_cmd = ""
-    tex_cmd += r"\centering"
-    tex_cmd += rf"\includegraphics[{fit}={{{bbox[fit]:.5f}in}}]{{{path_str}}}"
-    print(bbox[fit])
-    ax.text(0.0, 0.0, tex_cmd)
+        
+    if path_str.endswith(".pdf"):
+        # embed via LaTeX – quite buggy!
+        tex_cmd = ""
+        tex_cmd += r"\centering"
+        tex_cmd += rf"\includegraphics[{fit}={{{bbox[fit]:.5f}in}}]{{{path_str}}}"
+        print(bbox[fit])
+        ax.text(0.0, 0.0, tex_cmd)
+    else:
+        # embed via imshow
+        ax.imshow(plt.imread(path_str))
 
 def plot_traj(ax, x, y, alpha_min=.3, alpha_max=1., mark='none', gain=None, **largs):
     if gain is None:
@@ -1195,24 +1236,115 @@ class MinorSymLogLocator(Locator):
                                   '%s type.' % type(self))
 
 
-def rescale_rcparams(s):
+
+def plotting_context(context=None, font_scale=1, rc=None):
     """
     From https://matplotlib.org/stable/users/explain/customizing.html
     https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
     https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py#L335
     """
-    import seaborn as sns
-    ctx_dict = sns.plotting_context()
 
-    update_dict = {}
-    for k, v in ctx_dict.items():  # value is not used!
-        try:
-            update_dict[k] = s * plt.rcParams[k] if s != -1 else plt.rcParamsDefault[k]
-        except TypeError:
-            print(f"Could not rescale {k}")
+    """
+    Get the parameters that control the scaling of plot elements.
 
-    plt.rcParams.update(update_dict)
-    return plt
+    These parameters correspond to label size, line thickness, etc. For more
+    information, see the :doc:`aesthetics tutorial <../tutorial/aesthetics>`.
+
+    The base context is "notebook", and the other contexts are "paper", "talk",
+    and "poster", which are version of the notebook parameters scaled by different
+    values. Font elements can also be scaled independently of (but relative to)
+    the other values.
+
+    This function can also be used as a context manager to temporarily
+    alter the global defaults. See :func:`set_theme` or :func:`set_context`
+    to modify the global defaults for all plots.
+
+    Parameters
+    ----------
+    context : None, dict, or one of {paper, notebook, talk, poster}
+        A dictionary of parameters or the name of a preconfigured set.
+    font_scale : float, optional
+        Separate scaling factor to independently scale the size of the
+        font elements.
+    rc : dict, optional
+        Parameter mappings to override the values in the preset seaborn
+        context dictionaries. This only updates parameters that are
+        considered part of the context definition.
+
+    Examples
+    --------
+
+    .. include:: ../docstrings/plotting_context.rst
+
+    """
+    if context is None:
+        context_dict = {k: mpl.rcParams[k] for k in _context_keys}
+
+    elif isinstance(context, dict):
+        context_dict = context
+
+    else:
+
+        contexts = ["paper", "notebook", "talk", "poster"]
+        if context not in contexts and type(context) not in [int, float]:
+            raise ValueError(f"context must be in {', '.join(contexts)}")
+
+        # Set up dictionary of default parameters
+        texts_base_context = {
+
+            "font.size": 12,
+            "axes.labelsize": 12,
+            "axes.titlesize": 12,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "legend.fontsize": 11,
+            "legend.title_fontsize": 12,
+
+        }
+
+        base_context = {
+
+            "axes.linewidth": 1.25,
+            "grid.linewidth": 1,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 6,
+            "patch.linewidth": 1,
+
+            "xtick.major.width": 1.25,
+            "ytick.major.width": 1.25,
+            "xtick.minor.width": 1,
+            "ytick.minor.width": 1,
+
+            "xtick.major.size": 6,
+            "ytick.major.size": 6,
+            "xtick.minor.size": 4,
+            "ytick.minor.size": 4,
+
+        }
+        base_context.update(texts_base_context)
+
+        # Scale all the parameters by the same factor depending on the context
+        scaling = dict(paper=.8, notebook=1, talk=1.5, poster=2)[context] if type(context) == str else context
+        context_dict = {k: v * scaling for k, v in base_context.items()}
+
+        # Now independently scale the fonts
+        font_keys = texts_base_context.keys()
+        font_dict = {k: context_dict[k] * font_scale for k in font_keys}
+        context_dict.update(font_dict)
+
+    # Override these settings with the provided rc dictionary
+    if rc is not None:
+        rc = {k: v for k, v in rc.items() if k in _context_keys}
+        context_dict.update(rc)
+
+    # Wrap in a _PlottingContext object so this can be used in a with statement
+    # context_object = _PlottingContext(context_dict)
+
+    # return context_object
+            
+    return context_dict
+
+
 
 
 def c_line(ax, x, y, c, cmap, **largs):
@@ -1233,7 +1365,79 @@ def c_line(ax, x, y, c, cmap, **largs):
     ax.dataLim.y0 = y.min()
     ax.dataLim.y1 = y.max()
     ax.autoscale_view()
-def setup_axes_labels(axd, labels=None):
-    labels = [rf"$\mathbf{{{k.upper() if labels is None else labels[i_k]}}}$" for i_k, k in enumerate(list(axd.keys()))]
-    for i, ax in enumerate(axd.values()):
-        ax.text(x=-.2, y=1.2, s=labels[i], transform=ax.transAxes, fontsize=12, fontweight='bold', va='top', ha='right')
+
+def make_ax_label(ax, label):
+    label_ = rf"$\mathbf{{{label.upper()}}}$"
+    ax.text(x=-.2, y=1.2, s=label_, transform=ax.transAxes, fontsize=12, fontweight='bold', va='top', ha='right')
+
+LABEL_KWARGS = dict(size=12, weight='bold')
+def add_panel_label(
+        ax,
+        letter,
+        pad_x=0,
+        pad_y=0,
+        use_tight_bbox=False,
+        ha="right",
+        va="bottom",
+        transform=None,
+        return_text=False,
+        x=-.1,
+        y=1.1,
+        **text_kwargs,
+):
+
+    if "$" in letter:
+        letter_ = letter[1:-2]
+    else:
+        letter_ = letter
+
+    letter = r"$\mathrm{\mathbf{" + letter_ + "}}$"
+
+    if text_kwargs == {}:
+        text_kwargs = LABEL_KWARGS
+
+    if use_tight_bbox:
+        bbox_fig = tight_bbox(ax)
+        from matplotlib.transforms import TransformedBbox
+        from matplotlib.transforms import Affine2D
+        from matplotlib.transforms import Bbox
+
+        fig = ax.get_figure()
+        bbox_bare_fig = ax.get_position()
+
+        w, h = fig.get_size_inches()
+        bbox_bare_in = Bbox(
+            [
+                [bbox_bare_fig.y0 * w, bbox_bare_fig.y0 * h],
+                [bbox_bare_fig.x1 * w, bbox_bare_fig.y1 * h],
+            ]
+        )
+        bbox_ax = TransformedBbox(bbox_fig, ax.transAxes.inverted())
+        bbox_tight_in = TransformedBbox(bbox_fig, Affine2D().scale(1.0 / fig.dpi))
+
+        which_align = "left"
+        # get diff in inches and convert to points
+        start_x_pt = (
+            abs(bbox_tight_in.xmin - bbox_bare_in.xmin) * 72
+            if which_align == "left"
+            else abs(bbox_tight_in.xmax - bbox_bare_in.xmax) * 72
+        )
+
+        text = ax.annotate(letter, xy=(0, 1), xytext=(-start_x_pt - pad_x, 0),
+                           xycoords='axes fraction' if transform is None else transform, textcoords='offset points',
+                           ha=ha, va=va, rotation=0, **LABEL_KWARGS)
+    else:
+        # use title to trigger constrained layout
+        text = ax.set_title(
+            letter,
+            **text_kwargs,
+            ha=ha,
+            va=va,
+            x=x - pad_x,
+            y=y + pad_y,
+            pad=0.0,
+            transform=ax.transAxes if transform is None else transform,
+        )
+        
+
+    return text
