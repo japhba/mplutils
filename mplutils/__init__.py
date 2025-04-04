@@ -181,7 +181,7 @@ def extra_scale_from_function(ax, func, label="", extra=False):
     ax_sigma.set_xlabel(label)
 
 
-def multiple_formatter(denominator=2, number=np.pi, latex="\pi"):
+def multiple_formatter(denominator=2, number=np.pi, latex=r"\pi"):
     def gcd(a, b):
         while b:
             a, b = b, a % b
@@ -212,7 +212,7 @@ def multiple_formatter(denominator=2, number=np.pi, latex="\pi"):
     return _multiple_formatter
 
 class Multiple:
-    def __init__(self, denominator=2, number=np.pi, latex="\pi"):
+    def __init__(self, denominator=2, number=np.pi, latex=r"\pi"):
         self.denominator = denominator
         self.number = number
         self.latex = latex
@@ -318,8 +318,8 @@ def make_ax_label(ax, label):
 def add_panel_label(
     ax,
     letter,
-    pad_x=0,  # % fig x
-    pad_y=0,  # % fix x (sic!)
+    pad_x=5e-2,  # % fig x
+    pad_y=1e-2,  # % fix x (sic!)
     use_tight_bbox=False,
     ha="right",
     va="bottom",
@@ -368,7 +368,7 @@ def add_panel_label(
     assert pad_x < 1e-1 and pad_y < 1e-1, "Padding must be less than 0.1, as it's in fig_x coordinates!"
     
     # Use transAxes by default if no transform is provided
-    target_transform = transform if transform is not None else ax.transAxes
+    transform = transform if transform is not None else ax.transAxes
     
     fig = ax.get_figure(root=True)
     if use_tight_bbox:
@@ -394,9 +394,9 @@ def add_panel_label(
         # Debug: Mark the original and adjusted positions if debug is enabled
         if debug:
             # Original position
-            ax.plot([x], [y], 'go', transform=target_transform, markersize=5)
+            ax.plot([x], [y], 'go', transform=transform, markersize=5)
             # Adjusted position
-            ax.plot([adjusted_x], [adjusted_y], 'ro', transform=target_transform, markersize=5)
+            ax.plot([adjusted_x], [adjusted_y], 'ro', transform=transform, markersize=5)
             # Add a legend
             ax.text(0.02, 0.02, 'Original (green), Adjusted (red)', 
                    color='black', fontsize=8, transform=ax.transAxes)
@@ -421,7 +421,7 @@ def add_panel_label(
         letter,
         ha=ha,
         va=va,
-        transform=target_transform,
+        transform=transform,
         **text_kwargs
     )
     
@@ -1258,7 +1258,7 @@ def sym_lims(ax, which="y"):
     getattr(ax, f"set_{which}lim")(-bound, bound)
 
 
-def multiple_formatter(denominator=2, number=np.pi, latex="\pi"):
+def multiple_formatter(denominator=2, number=np.pi, latex=r"\pi"):
     def gcd(a, b):
         while b:
             a, b = b, a % b
@@ -1290,7 +1290,7 @@ def multiple_formatter(denominator=2, number=np.pi, latex="\pi"):
 
 
 class Multiple:
-    def __init__(self, denominator=2, number=np.pi, latex="\pi"):
+    def __init__(self, denominator=2, number=np.pi, latex=r"\pi"):
         self.denominator = denominator
         self.number = number
         self.latex = latex
