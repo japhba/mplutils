@@ -13,6 +13,7 @@ from matplotlib.ticker import Locator
 
 import joblib
 import matplotlib.pyplot as plt
+
 from matplotlib.transforms import Affine2D, Bbox, TransformedBbox, blended_transform_factory
 import numpy as np
 import yaml
@@ -247,14 +248,187 @@ def layout_ax(ax, tex=True):
     ax.spines["top"].set_visible(False)
 
 
-def tight_bbox(ax):
+import matplotlib.pyplot as plt
+from matplotlib.transforms import TransformedBbox, Bbox, Affine2D
+import matplotlib.patches as patches
+
+def tight_bbox(ax, debug=False):
+    """
+    Get the tight bounding box of an axes in figure coordinates.
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        The axes to get the tight bounding box for.
+    debug : bool
+        If True, draw the tight bounding box on the figure.
+        
+    Returns:
+    --------
+    tight_bbox_fig : matplotlib.transforms.Bbox
+        The tight bounding box in figure coordinates.
+    """
     fig = ax.get_figure()
-    tight_bbox_raw = ax.get_tightbbox(fig.canvas.get_renderer())
-    from matplotlib.transforms import TransformedBbox
-
+    renderer = fig.canvas.get_renderer()
+    tight_bbox_raw = ax.get_tightbbox(renderer)
     tight_bbox_fig = TransformedBbox(tight_bbox_raw, fig.transFigure.inverted())
-    return tight_bbox_raw
+    
+    if debug:
+        # Draw the tight bounding box on the figure
+        box_coords = tight_bbox_fig.get_points()
+        x0, y0 = box_coords[0]
+        width = box_coords[1, 0] - box_coords[0, 0]
+        height = box_coords[1, 1] - box_coords[0, 1]
+        
+        # Create a rectangle patch for the tight bbox
+        rect = patches.Rectangle(
+            (x0, y0), width, height,
+            linewidth=1, edgecolor='red', facecolor='none',
+            linestyle='--', transform=fig.transFigure
+        )
+        
+        # Get the current axes to properly overlay the rectangle
+        fig.add_artist(rect)
+        
+        # Also draw the regular bbox for comparison
+        regular_box = ax.get_position()
+        regular_rect = patches.Rectangle(
+            (regular_box.x0, regular_box.y0), 
+            regular_box.width, regular_box.height,
+            linewidth=1, edgecolor='blue', facecolor='none',
+            linestyle=':', transform=fig.transFigure
+        )
+        fig.add_artist(regular_rect)
+        
+        # Add a legend to explain the colors
+        fig.text(0.01, 0.01, 'Tight bbox (red), Regular bbox (blue)', 
+                 color='black', fontsize=8, transform=fig.transFigure)
+        
+    return tight_bbox_fig
 
+# Default label styling
+LABEL_KWARGS = dict(size=12, weight='bold')
+
+def make_ax_label(ax, label):
+    """Add a label to an axes with default styling."""
+    label_text = rf"$\mathbf{{{label.upper()}}}$"
+    ax.text(x=-.2, y=1.2, s=label_text, transform=ax.transAxes, 
+            fontsize=12, fontweight='bold', va='top', ha='right')
+
+def add_panel_label(
+    ax,
+    letter,
+    pad_x=0,  # % fig x
+    pad_y=0,  # % fix x (sic!)
+    use_tight_bbox=False,
+    ha="right",
+    va="bottom",
+    transform=None,
+    return_text=False,
+    x=0.0,
+    y=1.0,
+    debug=False,
+    **text_kwargs,
+):
+    """
+    Add a panel label to an axes.
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        The axes to add the label to.
+    letter : str
+        The label text.
+    pad_x, pad_y : float
+        Padding in the x and y directions.
+    use_tight_bbox : bool
+        Whether to use the tight bounding box for positioning.
+    ha, va : str
+        Horizontal and vertical alignment.
+    transform : matplotlib.transforms.Transform
+        Transform to use. If None, uses ax.transAxes.
+    return_text : bool
+        Whether to return the text object.
+    x, y : float
+        Position in axes coordinates.
+    debug : bool
+        If True, draw the tight bounding box on the figure.
+    **text_kwargs : dict
+        Additional text properties.
+    """
+    # Format the letter properly
+    if "$" not in letter:
+        letter = r"$\mathrm{\mathbf{" + letter + "}}$"
+    
+    # Use default kwargs if none provided
+    if not text_kwargs:
+        text_kwargs = LABEL_KWARGS.copy()
+        
+    assert pad_x >= 0 and pad_y >= 0, "Padding must be non-negative"
+    assert pad_x < 1e-1 and pad_y < 1e-1, "Padding must be less than 0.1, as it's in fig_x coordinates!"
+    
+    # Use transAxes by default if no transform is provided
+    target_transform = transform if transform is not None else ax.transAxes
+    
+    fig = ax.get_figure(root=True)
+    if use_tight_bbox:
+        # Get tight and regular bounding boxes
+        tight_box = tight_bbox(ax, debug=debug)
+        regular_box = ax.get_position()
+        
+        # Calculate offsets in axes coordinates for both x and y
+        x_offset = (tight_box.x0 - regular_box.x0) / regular_box.width
+        y_offset = (tight_box.y0 - regular_box.y0) / regular_box.height
+        
+        # Adjust the position based on the offsets and desired alignment
+        if ha == "right" or ha == "center":
+            adjusted_x = x - pad_x - x_offset
+        else:  # "left"
+            adjusted_x = x + pad_x - x_offset
+            
+        if va == "top" or va == "center":
+            adjusted_y = y + pad_y - y_offset
+        else:  # "bottom"
+            adjusted_y = y - pad_y - y_offset
+            
+        # Debug: Mark the original and adjusted positions if debug is enabled
+        if debug:
+            # Original position
+            ax.plot([x], [y], 'go', transform=target_transform, markersize=5)
+            # Adjusted position
+            ax.plot([adjusted_x], [adjusted_y], 'ro', transform=target_transform, markersize=5)
+            # Add a legend
+            ax.text(0.02, 0.02, 'Original (green), Adjusted (red)', 
+                   color='black', fontsize=8, transform=ax.transAxes)
+    else:
+        # Use the provided coordinates directly
+        trans_fig = blended_transform_factory(fig.transFigure, fig.transFigure)
+        
+        def trafo_tot(xy):
+            xy_displ = trans_fig.transform(xy)
+            xy_trafo = transform.inverted().transform(xy_displ)  # to trafo coordinates
+            return xy_trafo
+        
+        pad_trafo = trafo_tot((pad_x, pad_y)) - trafo_tot((0, 0))
+        adjusted_x = x - pad_trafo[0]
+        adjusted_y = y + pad_trafo[1]
+
+    
+    # Create the text with the calculated position
+    text = ax.text(
+        adjusted_x,
+        adjusted_y,
+        letter,
+        ha=ha,
+        va=va,
+        transform=target_transform,
+        **text_kwargs
+    )
+    
+    if return_text:
+        return text
+    
+    
 def format_angle(ax, n=2):
     ax.xaxis.set_major_locator(plt.MultipleLocator(np.pi / n))
     ax.xaxis.set_major_formatter(plt.FuncFormatter(multiple_formatter(n, np.pi)))
@@ -1182,14 +1356,14 @@ def plot_norm(ax, net, sim_opts, Xt=None, norms=None, warmup=False, N_SIGMA=None
     ax.set_ylabel(r"$|X|^2/N$")
     ax.axhline(
         net.Q0 / net.g2,
-        label="$x\sim Q_0/g^2$",
+        label=r"$x\sim Q_0/g^2$",
         color="C0",
         ls="dashed",
         lw=3,
     )
     ax.axhline(
         net.Q0,
-        label="$h\sim Q_0$",
+        label=r"$h\sim Q_0$",
         color="C1",
         ls="dashed",
         lw=3,
@@ -1365,79 +1539,3 @@ def c_line(ax, x, y, c, cmap, **largs):
     ax.dataLim.y0 = y.min()
     ax.dataLim.y1 = y.max()
     ax.autoscale_view()
-
-def make_ax_label(ax, label):
-    label_ = rf"$\mathbf{{{label.upper()}}}$"
-    ax.text(x=-.2, y=1.2, s=label_, transform=ax.transAxes, fontsize=12, fontweight='bold', va='top', ha='right')
-
-LABEL_KWARGS = dict(size=12, weight='bold')
-def add_panel_label(
-        ax,
-        letter,
-        pad_x=0,
-        pad_y=0,
-        use_tight_bbox=False,
-        ha="right",
-        va="bottom",
-        transform=None,
-        return_text=False,
-        x=-.1,
-        y=1.1,
-        **text_kwargs,
-):
-
-    if "$" in letter:
-        letter_ = letter[1:-2]
-    else:
-        letter_ = letter
-
-    letter = r"$\mathrm{\mathbf{" + letter_ + "}}$"
-
-    if text_kwargs == {}:
-        text_kwargs = LABEL_KWARGS
-
-    if use_tight_bbox:
-        bbox_fig = tight_bbox(ax)
-        from matplotlib.transforms import TransformedBbox
-        from matplotlib.transforms import Affine2D
-        from matplotlib.transforms import Bbox
-
-        fig = ax.get_figure()
-        bbox_bare_fig = ax.get_position()
-
-        w, h = fig.get_size_inches()
-        bbox_bare_in = Bbox(
-            [
-                [bbox_bare_fig.y0 * w, bbox_bare_fig.y0 * h],
-                [bbox_bare_fig.x1 * w, bbox_bare_fig.y1 * h],
-            ]
-        )
-        bbox_ax = TransformedBbox(bbox_fig, ax.transAxes.inverted())
-        bbox_tight_in = TransformedBbox(bbox_fig, Affine2D().scale(1.0 / fig.dpi))
-
-        which_align = "left"
-        # get diff in inches and convert to points
-        start_x_pt = (
-            abs(bbox_tight_in.xmin - bbox_bare_in.xmin) * 72
-            if which_align == "left"
-            else abs(bbox_tight_in.xmax - bbox_bare_in.xmax) * 72
-        )
-
-        text = ax.annotate(letter, xy=(0, 1), xytext=(-start_x_pt - pad_x, 0),
-                           xycoords='axes fraction' if transform is None else transform, textcoords='offset points',
-                           ha=ha, va=va, rotation=0, **LABEL_KWARGS)
-    else:
-        # use title to trigger constrained layout
-        text = ax.set_title(
-            letter,
-            **text_kwargs,
-            ha=ha,
-            va=va,
-            x=x - pad_x,
-            y=y + pad_y,
-            pad=0.0,
-            transform=ax.transAxes if transform is None else transform,
-        )
-        
-
-    return text
