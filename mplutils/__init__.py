@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from matplotlib import cm
 from matplotlib.ticker import Locator
-
+import matplotlib as mpl
 
 import joblib
 import matplotlib.pyplot as plt
@@ -1410,14 +1410,80 @@ class MinorSymLogLocator(Locator):
                                   '%s type.' % type(self))
 
 
+"""
+From https://matplotlib.org/stable/users/explain/customizing.html
+https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
+https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py#L335
+"""
+_style_keys = [
+
+    "axes.facecolor",
+    "axes.edgecolor",
+    "axes.grid",
+    "axes.axisbelow",
+    "axes.labelcolor",
+
+    "figure.facecolor",
+
+    "grid.color",
+    "grid.linestyle",
+
+    "text.color",
+
+    "xtick.color",
+    "ytick.color",
+    "xtick.direction",
+    "ytick.direction",
+    "lines.solid_capstyle",
+
+    "patch.edgecolor",
+    "patch.force_edgecolor",
+
+    "image.cmap",
+    "font.family",
+    "font.sans-serif",
+
+    "xtick.bottom",
+    "xtick.top",
+    "ytick.left",
+    "ytick.right",
+
+    "axes.spines.left",
+    "axes.spines.bottom",
+    "axes.spines.right",
+    "axes.spines.top",
+
+]
+
+_context_keys = [
+
+    "font.size",
+    "axes.labelsize",
+    "axes.titlesize",
+    "xtick.labelsize",
+    "ytick.labelsize",
+    "legend.fontsize",
+    "legend.title_fontsize",
+
+    "axes.linewidth",
+    "grid.linewidth",
+    "lines.linewidth",
+    "lines.markersize",
+    "patch.linewidth",
+
+    "xtick.major.width",
+    "ytick.major.width",
+    "xtick.minor.width",
+    "ytick.minor.width",
+
+    "xtick.major.size",
+    "ytick.major.size",
+    "xtick.minor.size",
+    "ytick.minor.size",
+
+]
 
 def plotting_context(context=None, font_scale=1, rc=None):
-    """
-    From https://matplotlib.org/stable/users/explain/customizing.html
-    https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
-    https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py#L335
-    """
-
     """
     Get the parameters that control the scaling of plot elements.
 
@@ -1498,18 +1564,15 @@ def plotting_context(context=None, font_scale=1, rc=None):
         base_context.update(texts_base_context)
 
         # Scale all the parameters by the same factor depending on the context
-        scaling = dict(paper=.8, notebook=1, talk=1.5, poster=2)[context] if type(context) == str else context
-        context_dict = {k: v * scaling for k, v in base_context.items()}
+        scale = dict(paper=.8, notebook=1, talk=1.5, poster=2)[context] if type(context) == str else context
+        context_dict = {k: v * scale for k, v in base_context.items()}
 
         # Now independently scale the fonts
         font_keys = texts_base_context.keys()
         font_dict = {k: context_dict[k] * font_scale for k in font_keys}
         context_dict.update(font_dict)
 
-    # Override these settings with the provided rc dictionary
-    if rc is not None:
-        rc = {k: v for k, v in rc.items() if k in _context_keys}
-        context_dict.update(rc)
+
 
     # Wrap in a _PlottingContext object so this can be used in a with statement
     # context_object = _PlottingContext(context_dict)
