@@ -1,3 +1,4 @@
+import functools
 import logging
 import platform
 import pprint
@@ -10,6 +11,7 @@ from dataclasses import asdict
 from matplotlib import cm
 from matplotlib.ticker import Locator
 
+import matplotlib as mpl
 
 import joblib
 import matplotlib.pyplot as plt
@@ -1236,8 +1238,136 @@ class MinorSymLogLocator(Locator):
                                   '%s type.' % type(self))
 
 
+# https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py
 
-def plotting_context(context=None, font_scale=1, rc=None):
+_style_keys = [
+
+    "axes.facecolor",
+    "axes.edgecolor",
+    "axes.grid",
+    "axes.axisbelow",
+    "axes.labelcolor",
+
+    "figure.facecolor",
+
+    "grid.color",
+    "grid.linestyle",
+
+    "text.color",
+
+    "xtick.color",
+    "ytick.color",
+    "xtick.direction",
+    "ytick.direction",
+    "lines.solid_capstyle",
+
+    "patch.edgecolor",
+    "patch.force_edgecolor",
+
+    "image.cmap",
+    "font.family",
+    "font.sans-serif",
+
+    "xtick.bottom",
+    "xtick.top",
+    "ytick.left",
+    "ytick.right",
+
+    "axes.spines.left",
+    "axes.spines.bottom",
+    "axes.spines.right",
+    "axes.spines.top",
+
+]
+
+_context_keys = [
+
+    "font.size",
+    "axes.labelsize",
+    "axes.titlesize",
+    "xtick.labelsize",
+    "ytick.labelsize",
+    "legend.fontsize",
+    "legend.title_fontsize",
+
+    "axes.linewidth",
+    "grid.linewidth",
+    "lines.linewidth",
+    "lines.markersize",
+    "patch.linewidth",
+
+    "xtick.major.width",
+    "ytick.major.width",
+    "xtick.minor.width",
+    "ytick.minor.width",
+
+    "xtick.major.size",
+    "ytick.major.size",
+    "xtick.minor.size",
+    "ytick.minor.size",
+
+]
+
+def set_context(context=None, font_scale=1, rc=None):
+    """
+    Set the parameters that control the scaling of plot elements.
+
+    These parameters correspond to label size, line thickness, etc.
+    Calling this function modifies the global matplotlib `rcParams`. For more
+    information, see the :doc:`aesthetics tutorial <../tutorial/aesthetics>`.
+
+    The base context is "notebook", and the other contexts are "paper", "talk",
+    and "poster", which are version of the notebook parameters scaled by different
+    values. Font elements can also be scaled independently of (but relative to)
+    the other values.
+
+    See :func:`plotting_context` to get the parameter values.
+
+    Parameters
+    ----------
+    context : dict, or one of {paper, notebook, talk, poster}
+        A dictionary of parameters or the name of a preconfigured set.
+    font_scale : float, optional
+        Separate scaling factor to independently scale the size of the
+        font elements.
+    rc : dict, optional
+        Parameter mappings to override the values in the preset seaborn
+        context dictionaries. This only updates parameters that are
+        considered part of the context definition.
+
+    Examples
+    --------
+
+    .. include:: ../docstrings/set_context.rst
+
+    """
+    context_object = plotting_context(context, font_scale, rc)
+    mpl.rcParams.update(context_object)
+
+class _RCAesthetics(dict):
+    def __enter__(self):
+        rc = mpl.rcParams
+        self._orig = {k: rc[k] for k in self._keys}
+        self._set(self)
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self._set(self._orig)
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return wrapper
+
+class _PlottingContext(_RCAesthetics):
+    """Light wrapper on a dict to set context temporarily."""
+    _keys = _context_keys
+    _set = staticmethod(set_context)
+
+
+
+def plotting_context(context=None, font_scale=1, rc=None, return_dict=True):
     """
     From https://matplotlib.org/stable/users/explain/customizing.html
     https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
@@ -1338,11 +1468,10 @@ def plotting_context(context=None, font_scale=1, rc=None):
         context_dict.update(rc)
 
     # Wrap in a _PlottingContext object so this can be used in a with statement
-    # context_object = _PlottingContext(context_dict)
+    context_object = _PlottingContext(context_dict)
 
-    # return context_object
-            
-    return context_dict
+    return context_dict if return_dict else context_object
+
 
 
 
