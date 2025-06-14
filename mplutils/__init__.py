@@ -10,10 +10,7 @@ from dataclasses import asdict
 
 from matplotlib import cm
 from matplotlib.ticker import Locator
-<<<<<<< HEAD
 
-=======
->>>>>>> 13dc7307bc71dabb3455345288f06358a0e89d0c
 import matplotlib as mpl
 
 import joblib
@@ -1415,9 +1412,6 @@ class MinorSymLogLocator(Locator):
                                   '%s type.' % type(self))
 
 
-<<<<<<< HEAD
-# https://github.com/mwaskom/seaborn/blob/f0b48e891a1bb573b7a46cfc9936dcd35d7d4f24/seaborn/rcmod.py
-=======
 """
 From https://matplotlib.org/stable/users/explain/customizing.html
 https://seaborn.pydata.org/generated/seaborn.plotting_context.html#seaborn.plotting_context
@@ -1490,75 +1484,7 @@ _context_keys = [
     "ytick.minor.size",
 
 ]
->>>>>>> 13dc7307bc71dabb3455345288f06358a0e89d0c
 
-_style_keys = [
-
-    "axes.facecolor",
-    "axes.edgecolor",
-    "axes.grid",
-    "axes.axisbelow",
-    "axes.labelcolor",
-
-    "figure.facecolor",
-
-    "grid.color",
-    "grid.linestyle",
-
-    "text.color",
-
-    "xtick.color",
-    "ytick.color",
-    "xtick.direction",
-    "ytick.direction",
-    "lines.solid_capstyle",
-
-    "patch.edgecolor",
-    "patch.force_edgecolor",
-
-    "image.cmap",
-    "font.family",
-    "font.sans-serif",
-
-    "xtick.bottom",
-    "xtick.top",
-    "ytick.left",
-    "ytick.right",
-
-    "axes.spines.left",
-    "axes.spines.bottom",
-    "axes.spines.right",
-    "axes.spines.top",
-
-]
-
-_context_keys = [
-
-    "font.size",
-    "axes.labelsize",
-    "axes.titlesize",
-    "xtick.labelsize",
-    "ytick.labelsize",
-    "legend.fontsize",
-    "legend.title_fontsize",
-
-    "axes.linewidth",
-    "grid.linewidth",
-    "lines.linewidth",
-    "lines.markersize",
-    "patch.linewidth",
-
-    "xtick.major.width",
-    "ytick.major.width",
-    "xtick.minor.width",
-    "ytick.minor.width",
-
-    "xtick.major.size",
-    "ytick.major.size",
-    "xtick.minor.size",
-    "ytick.minor.size",
-
-]
 
 def set_context(context=None, font_scale=1, rc=None):
     """
