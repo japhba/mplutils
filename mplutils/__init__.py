@@ -13,7 +13,6 @@ from matplotlib.ticker import Locator
 
 import matplotlib as mpl
 
-import joblib
 import matplotlib.pyplot as plt
 
 from matplotlib.transforms import Affine2D, Bbox, TransformedBbox, blended_transform_factory
@@ -551,74 +550,103 @@ def save_plot(
         path,
         configs={},
         fn_dict={},
-        anim=None,
-        fig=None,
-        file_formats=["png", "svg", "pdf"],
+        fig_or_ani=None,
+        file_formats=None,
         use_hash=False,
         fn_prefix=None,
         include_filename=True,
         script_fn=None,
         **save_args
 ):
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import yaml
+    import hashlib
+    import json
+
+    # Merge configs
     config_ = {}
     for config in configs:
         try:
             config = asdict(config)
         except:
             pass
-        config_ = config | config_
+        config_ |= config
 
-    try:
-        path.mkdir()
-    except:
-        pass
+    # Default savefig args
+    # save_args_dflt = dict(bbox_inches='tight')
+    save_args_dflt = {}
+    save_args = {**save_args_dflt, **save_args}
 
-    if use_hash:
-        config_hash = joblib.hash(config_)[:4] if config_ != {} else ""
+    # Ensure output directory exists
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+    # Hash (using stdlib)
+    if use_hash and config_:
+        serialized = json.dumps(config_, sort_keys=True)
+        config_hash = hashlib.sha1(serialized.encode('utf-8')).hexdigest()[:4]
     else:
-        config_hash = ""
+        config_hash = ''
 
+    # Script name
     if script_fn is None:
-       script_fn = Path(__file__).stem
+        script_fn = Path(__file__).stem
 
-    fn_ = (
-            (script_fn if include_filename else "")
-            + ("__" if fn_dict != {} else "")
-            + "__".join([f"{k}_{v}" for k, v in fn_dict.items()])
-            + ("__" + config_hash if config_hash else "")
-    )
-    if fn_prefix is not None:
-        fn_prefix = fn_prefix + "_" + fn_
+    # Build filename base
+    name_parts = []
+    if include_filename:
+        name_parts.append(script_fn)
+    if fn_dict:
+        for k, v in fn_dict.items():
+            name_parts.append(f"{str_to_fn(k)}_{str_to_fn(v)}")
+    if config_hash:
+        name_parts.append(config_hash)
+    fn_base = "__".join(name_parts)[:100]
+    if fn_prefix:
+        fn_base = f"{fn_prefix}_{fn_base}"
+
+    # Determine if fig_or_ani is a Figure or Animation
+    is_animation = hasattr(fig_or_ani, 'save') and hasattr(fig_or_ani, 'frame_seq')
+
+    # Determine file formats
+    if not is_animation:
+        if file_formats is None:
+            file_formats = [plt.rcParams.get('savefig.format', 'png')]
     else:
-        fn_prefix = fn_
+        # animation: default to mp4
+        file_formats = [fmt.lower() for fmt in (file_formats or ['mp4'])]
 
-    if anim is None:
-        # save_args.update(bbox_inches='tight', )
-        for file_format in file_formats:
-            if "png" in file_format: save_args.update({"dpi": 400})
-            transparent = save_args.pop("transparent", True)
-            if fig is None:
-                plt.savefig(path / (fn_prefix + f".{file_format}"), transparent=transparent, **save_args)
-            else:
-                fig.savefig(path / (fn_prefix + f".{file_format}"), transparent=transparent, **save_args)
+    # Save
+    if not is_animation:
+        fig = fig_or_ani or plt.gcf()
+        for fmt in file_formats:
+            if fmt == 'png':
+                save_args.setdefault('dpi', 400)
+            transparent = save_args.pop('transparent', True)
+            fname = Path(path) / f"{fn_base}.{fmt}"
+            fig.savefig(fname, transparent=transparent, **save_args)
     else:
-        plt.rcParams["animation.ffmpeg_path"] = "/usr/local/bin/ffmpeg"
-        anim.save(path / (fn_prefix + ".mp4"), **save_args)
+        # set ffmpeg path if needed
+        plt.rcParams['animation.ffmpeg_path'] = plt.rcParams.get('animation.ffmpeg_path', '')
+        out_file = Path(path) / f"{fn_base}.{file_formats[0]}"
+        fig_or_ani.save(str(out_file), **save_args)
 
+    # Save config YAML
     def to_python_type(v):
         if np.isscalar(v):
-            if np.issubdtype(type(v), np.integer):
-                return int(v)
-            elif np.issubdtype(type(v), np.floating):
-                return float(v)
-        else:
-            return v
-        
-    with open(path / (fn_prefix + ".yml"), "w") as file:
+            if np.issubdtype(type(v), np.integer): return int(v)
+            if np.issubdtype(type(v), np.floating): return float(v)
+        return v
+
+    yml_path = Path(path) / f"{fn_base}.yml"
+    with open(yml_path, 'w') as file:
         yaml.dump(
-            {k: to_python_type(v) for k, v in config_.items() if (not hasattr(v, "__len__") or type(v) is str)},
+            {k: to_python_type(v) for k, v in config_.items()
+             if not hasattr(v, '__len__') or isinstance(v, str)},
             file,
         )
+
 
 def save_test_artifact(request, fig=None, title="", **kwargs):
     artifact_dir = TESTPATH / "artifacts" / request.node.path.stem
