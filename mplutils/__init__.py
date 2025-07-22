@@ -1691,3 +1691,28 @@ def c_line(ax, x, y, c, cmap, **largs):
     ax.dataLim.y0 = y.min()
     ax.dataLim.y1 = y.max()
     ax.autoscale_view()
+
+
+# Define mosaic layout using subfigures
+def create_subfig_mosaic(parent_fig, mosaic):
+    """Create a dictionary of subfigures based on mosaic layout"""
+    rows = len(mosaic)
+    cols = max(len(row) for row in mosaic)
+    
+    # Create grid of subfigures
+    subfigs_grid = parent_fig.subfigures(rows, cols)
+    if rows == 1:
+        subfigs_grid = [subfigs_grid]
+    if cols == 1:
+        subfigs_grid = [[sf] for sf in subfigs_grid]
+    elif rows == 1:
+        subfigs_grid = [subfigs_grid]
+    
+    # Map labels to subfigures
+    subfig_dict = {}
+    for i, row in enumerate(mosaic):
+        for j, label in enumerate(row):
+            if label != '.':  # Skip empty cells
+                subfig_dict[label] = subfigs_grid[i][j]
+    
+    return subfig_dict
