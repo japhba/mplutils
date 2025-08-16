@@ -66,6 +66,11 @@ def get_inkscape_palettes_directory():
     
     return Path(path)
 
+def darken(color, darken_factor=0.7):
+    import matplotlib.colors as mcolors
+    _rgba = np.array(mcolors.to_rgba(color), dtype=float)
+    _rgba[:3] = np.clip(_rgba[:3] * darken_factor, 0, 1)
+    return tuple(_rgba)
 
 
 def plot_rasterplot(ax, Xt, norm=None, aspect="auto", extent=None,  axis_off=True, **largs):
