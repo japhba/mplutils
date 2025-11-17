@@ -1699,25 +1699,19 @@ def c_line(ax, x, y, c, cmap, **largs):
 
 
 # Define mosaic layout using subfigures
-def create_subfig_mosaic(parent_fig, mosaic):
+def subfig_mosaic(parent_fig, mosaic):
     """Create a dictionary of subfigures based on mosaic layout"""
-    rows = len(mosaic)
-    cols = max(len(row) for row in mosaic)
+    mosaic = np.array(mosaic)
+    rows = mosaic.shape[0]
+    cols = mosaic.shape[1]
     
     # Create grid of subfigures
-    subfigs_grid = parent_fig.subfigures(rows, cols)
-    if rows == 1:
-        subfigs_grid = [subfigs_grid]
-    if cols == 1:
-        subfigs_grid = [[sf] for sf in subfigs_grid]
-    elif rows == 1:
-        subfigs_grid = [subfigs_grid]
-    
+    subfigs_grid = parent_fig.subfigures(rows, cols, squeeze=False)
+
     # Map labels to subfigures
-    subfig_dict = {}
-    for i, row in enumerate(mosaic):
-        for j, label in enumerate(row):
-            if label != '.':  # Skip empty cells
-                subfig_dict[label] = subfigs_grid[i][j]
+    subfig_dict = dict()
+    for i, j in np.ndindex(mosaic.shape):
+        if mosaic[i, j] == '.':  continue
+        subfig_dict[mosaic[i, j]] = subfigs_grid[i, j]
     
     return subfig_dict
