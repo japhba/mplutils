@@ -1715,3 +1715,6 @@ def subfig_mosaic(parent_fig, mosaic):
         subfig_dict[mosaic[i, j]] = subfigs_grid[i, j]
     
     return subfig_dict
+
+
+from .svgshow import patch_svgshow, svgshow
