@@ -19,7 +19,9 @@ from matplotlib.transforms import Affine2D, Bbox, TransformedBbox, blended_trans
 import numpy as np
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mplutils")
+if not logger.handlers:
+    logger.addHandler(logging.NullHandler())
 
 import os
 import sys
